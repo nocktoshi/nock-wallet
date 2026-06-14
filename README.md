@@ -1,5 +1,8 @@
 # Nock Wallet
 
+<img width="500" height="811" alt="image" src="https://github.com/user-attachments/assets/e8d88109-4776-4918-aa64-2efa321b3ad5" />
+
+
 A non-custodial **Nockchain web wallet** — create/import a wallet, send & receive NOCK, and connect dApps — built entirely on the pure-TypeScript [`@nockchain/rose-ts`](https://www.npmjs.com/package/@nockchain/rose-ts) primitives (no WebAssembly).
 
 ## Features
