@@ -1,0 +1,9 @@
+{
+  "name": "@rose-web/connect",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Connect a dApp to the Nock Wallet wallet — injects an Iris-compatible window.nockchain backed by a hosted-wallet popup.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "license": "MIT"
+}
