@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
-import type { Hex } from "viem";
+import type { Hex, Address } from "viem";
 import type { DraftSwap, SwapPublic } from "../../swap/swap.js";
-import { lockUsdcAction, resolvePreimage } from "../../swap/actions/buyer.js";
+import { lockUsdcAction, resolvePreimage, refundUsdcAction } from "../../swap/actions/buyer.js";
+import { computeSwapId, getOnchainLock, usdcToAtomic } from "../../swap/evm/htlc.js";
 import { verifyNockLockConfirmed } from "../../swap/nock/balance.js";
 import { getSwapRepository } from "../../swap/app/repo/swap-repo.js";
 import { useSwapSession } from "./session.js";
@@ -14,6 +15,56 @@ import { NICKS_PER_NOCK } from "../../nock/units.js";
 
 const SWAP_POLL_MS = 12_000;
 
+// The on-chain USDC lock and the worker "advance" that records it are two steps.
+// If the lock lands but the publish fails (expired session, network, closed tab),
+// the swap is orphaned: funds locked, solver none the wiser. We durably stash the
+// lock locally the instant it confirms, retry the publish, and re-publish on the
+// next visit — so a transient failure self-heals instead of stranding the buyer.
+const PENDING_LOCK_PREFIX = "rose:pending-usdc-lock:";
+
+function savePendingLock(hEvm: string, fields: { usdcLockTxHash: string; buyerEth: string }): void {
+  try {
+    localStorage.setItem(PENDING_LOCK_PREFIX + hEvm.toLowerCase(), JSON.stringify(fields));
+  } catch {
+    /* storage unavailable (private mode etc.) — chain recovery still covers it */
+  }
+}
+
+function loadPendingLock(hEvm: string): { usdcLockTxHash: string; buyerEth: string } | null {
+  try {
+    const raw = localStorage.getItem(PENDING_LOCK_PREFIX + hEvm.toLowerCase());
+    return raw ? (JSON.parse(raw) as { usdcLockTxHash: string; buyerEth: string }) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearPendingLock(hEvm: string): void {
+  try {
+    localStorage.removeItem(PENDING_LOCK_PREFIX + hEvm.toLowerCase());
+  } catch {
+    /* ignore */
+  }
+}
+
+async function publishWithRetry(
+  put: (s: SwapPublic) => Promise<void>,
+  swap: SwapPublic,
+  attempts = 4
+): Promise<void> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await put(swap);
+      return;
+    } catch (e) {
+      lastErr = e;
+    }
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500 * 2 ** i));
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr ?? "publish failed"));
+}
+
 type BuyStage =
   | "input"
   | "waiting-fill"
@@ -23,6 +74,8 @@ type BuyStage =
   | "waiting-reveal"
   | "ready-to-claim"
   | "claiming"
+  | "refunding"
+  | "refunded"
   | "done";
 
 const STEPPER = [
@@ -35,6 +88,7 @@ const STEPPER = [
 
 function stepperIndex(stage: BuyStage, swap: DraftSwap | null): number {
   if (stage === "done" || swap?.nockClaimTxId) return 4;
+  if (stage === "refunded" || swap?.usdcRefundTxHash) return 2;
   if (stage === "ready-to-claim" || stage === "claiming" || swap?.usdcWithdrawTxHash) return 3;
   if (swap?.usdcLockTxHash || stage === "waiting-reveal") return 2;
   if (stage === "ready-to-lock" || stage === "locking") return 2;
@@ -71,10 +125,43 @@ export function BuyerFlow({
   const swapPollInFlight = useRef(false);
   const actionInFlight = useRef(false);
   const evmSwapIdRef = useRef<Hex | null>(null);
+  const lockDetectedRef = useRef<Set<string>>(new Set());
 
   const logMsg = (msg: string) => setLog((l) => (l ? `${l}\n${msg}` : msg));
   const logErr = (err: unknown) =>
     setError(err instanceof Error ? err.message : String(err));
+
+  // Detect a USDC lock the buyer already placed on-chain (a prior publish failed,
+  // or they returned later/on another device) and make sure the worker reflects
+  // it. Returns true when a live lock exists — so we show "finalizing" instead of
+  // prompting another lock (which the contract would reject as a duplicate).
+  const detectAndSyncLock = useCallback(
+    async (s: SwapPublic): Promise<boolean> => {
+      if (!evm || !s.sellerEth || !s.usdcAmount || s.usdcTimelock == null) return false;
+      const buyer = (s.buyerEth ?? evm) as Address;
+      const amount = await usdcToAtomic(s.usdcAmount, s.token);
+      const swapId = await computeSwapId(
+        { seller: s.sellerEth as Address, buyer, amount, hashlock: s.hEvm as Hex, timelock: s.usdcTimelock },
+        s.token
+      );
+      const lock = await getOnchainLock(swapId, s.token);
+      if (!lock || lock.amount <= 0n || lock.refunded || lock.withdrawn) return false;
+      evmSwapIdRef.current = swapId;
+      // Push the lock tx to the worker if we still know it (from this device's
+      // pending stash); otherwise the solver recovers it from chain on its side.
+      const usdcLockTxHash = loadPendingLock(s.hEvm)?.usdcLockTxHash ?? s.usdcLockTxHash;
+      if (usdcLockTxHash) {
+        try {
+          await publishWithRetry((x) => repo.put(x), { ...s, buyerEth: lock.buyer, usdcLockTxHash });
+          clearPendingLock(s.hEvm);
+        } catch {
+          /* worker still unaware — kept pending; solver also recovers from chain */
+        }
+      }
+      return true;
+    },
+    [evm, repo]
+  );
 
   const quoteReady = quote?.status === "ready";
   const estNock = quoteReady && quote.amountOut ? parseFloat(quote.amountOut) : null;
@@ -123,7 +210,7 @@ export function BuyerFlow({
   useEffect(() => {
     const hEvm = swap.hEvm;
     const activeBid = bidId;
-    if ((!hEvm && !activeBid) || stage === "input" || stage === "done") return;
+    if ((!hEvm && !activeBid) || stage === "input" || stage === "done" || stage === "refunded") return;
     let alive = true;
 
     const poll = async () => {
@@ -154,6 +241,10 @@ export function BuyerFlow({
           setStage("done");
           return;
         }
+        if (s.usdcRefundTxHash) {
+          setStage("refunded");
+          return;
+        }
         if (s.usdcWithdrawTxHash) {
           setStage((p) => (p === "claiming" ? p : "ready-to-claim"));
           return;
@@ -163,10 +254,28 @@ export function BuyerFlow({
           return;
         }
         if (s.lockFirstName) {
+          // Already locked on a prior poll this session — don't re-prompt.
+          if (lockDetectedRef.current.has(id)) {
+            setStage((p) => (p === "locking" ? p : "waiting-reveal"));
+            return;
+          }
           if (!nock || !evm) {
             setStage("verifying");
             return;
           }
+          // The buyer may have already locked USDC on-chain (a prior publish
+          // failed). Detect + re-sync before prompting another lock.
+          try {
+            if (await detectAndSyncLock(s)) {
+              lockDetectedRef.current.add(id);
+              if (!alive) return;
+              setStage("waiting-reveal");
+              return;
+            }
+          } catch {
+            /* transient chain read — retry on the next poll */
+          }
+          if (!alive) return;
           const v = await verifyNockLockConfirmed(nock, {
             lockFirstName: s.lockFirstName,
             lockRoot: s.lockRoot,
@@ -200,7 +309,7 @@ export function BuyerFlow({
       alive = false;
       clearInterval(t);
     };
-  }, [swap.hEvm, bidId, stage, repo, setSwap, nock, evm]);
+  }, [swap.hEvm, bidId, stage, repo, setSwap, nock, evm, detectAndSyncLock]);
 
   useEffect(() => {
     if (quote?.status === "ready" && quote.amountOut) {
@@ -250,18 +359,45 @@ export function BuyerFlow({
 
   async function onLockUsdc(): Promise<void> {
     if (busy || !swap.hEvm || !nock) return;
+    const hEvm = swap.hEvm;
     setBusy(true);
     actionInFlight.current = true;
     setError("");
     try {
       setStage("locking");
+      // If a prior attempt already locked on-chain, re-sync instead of locking
+      // again (a duplicate lock reverts). Covers a publish that failed last time.
+      if (await detectAndSyncLock(swap as SwapPublic)) {
+        lockDetectedRef.current.add(hEvm);
+        setStage("waiting-reveal");
+        logMsg("USDC already locked on-chain — solver finalizing…");
+        return;
+      }
       logMsg("Approve + lock USDC in your Base wallet…");
       const { swapId, lockTxHash, swap: locked } = await lockUsdcAction({ swap: swap as SwapPublic });
       evmSwapIdRef.current = swapId;
-      await repo.put(locked);
+      // Durably record the lock locally the instant it confirms — BEFORE the
+      // worker write — so a failed/interrupted publish can be retried later
+      // (the on-chain funds are already committed at this point).
+      savePendingLock(locked.hEvm, {
+        usdcLockTxHash: locked.usdcLockTxHash as string,
+        buyerEth: locked.buyerEth as string,
+      });
+      lockDetectedRef.current.add(locked.hEvm);
       setSwap(locked);
       setStage("waiting-reveal");
-      logMsg(`USDC locked (tx ${lockTxHash}). Solver finalizing…`);
+      logMsg(`USDC locked (tx ${lockTxHash}). Notifying solver…`);
+      try {
+        await publishWithRetry((x) => repo.put(x), locked);
+        clearPendingLock(locked.hEvm);
+        logMsg("Solver notified — finalizing…");
+      } catch {
+        // Lock is safe on-chain; the worker write didn't land. We keep the
+        // pending stash and re-publish on the next poll/visit, and the solver
+        // independently recovers the lock from chain. Don't fail back to
+        // "ready-to-lock" — re-locking would revert.
+        logMsg("Your USDC is locked, but the solver couldn't be reached yet — we'll keep retrying automatically. You can also refund below once the timelock passes.");
+      }
     } catch (e) {
       setStage("ready-to-lock");
       logErr(e);
@@ -304,8 +440,94 @@ export function BuyerFlow({
     }
   }
 
+  // Reclaim USDC the buyer locked on-chain when the swap stalled — including the
+  // case where the lock never registered with the worker (publish failed after
+  // the on-chain lock), so the worker record has no usdcLockTxHash/buyerEth. We
+  // recompute the swap id from the connected wallet and refund straight on-chain.
+  async function onRefundUsdc(): Promise<void> {
+    if (busy || stage === "refunding") return;
+    if (!evm) {
+      setError("Connect your Base wallet to refund.");
+      return;
+    }
+    if (!swap.hEvm || !swap.sellerEth || !swap.usdcAmount || swap.usdcTimelock == null) {
+      setError("This swap is missing the details needed to refund.");
+      return;
+    }
+    setBusy(true);
+    actionInFlight.current = true;
+    setError("");
+    const prevStage = stage;
+    try {
+      setStage("refunding");
+      logMsg("Checking your on-chain USDC lock…");
+      const buyer = (swap.buyerEth ?? evm) as Address;
+      const amount = await usdcToAtomic(swap.usdcAmount, swap.token);
+      const swapId = await computeSwapId(
+        {
+          seller: swap.sellerEth as Address,
+          buyer,
+          amount,
+          hashlock: swap.hEvm as Hex,
+          timelock: swap.usdcTimelock,
+        },
+        swap.token
+      );
+      const lock = await getOnchainLock(swapId, swap.token);
+      if (!lock || lock.amount <= 0n || lock.refunded) {
+        throw new Error("No refundable USDC lock found for this swap — it may already be refunded.");
+      }
+      if (lock.withdrawn) {
+        throw new Error("The seller already finalized this swap — claim your NOCK instead of refunding.");
+      }
+      const nowSec = Math.floor(Date.now() / 1000);
+      const unlock = Number(swap.usdcTimelock);
+      if (nowSec < unlock) {
+        throw new Error(
+          `USDC is still time-locked. You can refund after ${new Date(unlock * 1000).toLocaleString()}.`
+        );
+      }
+      logMsg("Approve the refund in your Base wallet…");
+      const { hash, swap: refunded } = await refundUsdcAction({
+        swap: { ...(swap as SwapPublic), buyerEth: buyer },
+      });
+      setSwap(refunded);
+      setStage("refunded");
+      logMsg(`USDC refunded (tx ${hash}). Funds are back in your wallet.`);
+      // Best-effort: tell the worker so the solver stops waiting. The on-chain
+      // refund already succeeded regardless of whether this write lands.
+      try {
+        await repo.put(refunded);
+      } catch {
+        /* ignore — record update is non-critical */
+      }
+    } catch (e) {
+      setStage(prevStage);
+      logErr(e);
+    } finally {
+      actionInFlight.current = false;
+      setBusy(false);
+    }
+  }
+
   const canAct = !!nock && !!evm;
   const activeStep = stepperIndex(stage, swap);
+  // A locked-but-unfinished swap can be reclaimed. Hidden once it's claimed,
+  // already refunded, or the seller withdrew (the buyer should claim instead),
+  // and before the solver has even locked NOCK (no lock can exist yet).
+  const canRefund =
+    !!swap.hEvm &&
+    !!swap.sellerEth &&
+    !!swap.usdcAmount &&
+    swap.usdcTimelock != null &&
+    !swap.nockClaimTxId &&
+    !swap.usdcRefundTxHash &&
+    !swap.usdcWithdrawTxHash &&
+    stage !== "input" &&
+    stage !== "waiting-fill" &&
+    stage !== "refunded";
+  const refundReadyAt =
+    swap.usdcTimelock != null ? new Date(Number(swap.usdcTimelock) * 1000).toLocaleString() : "";
   const inFlow = !!(swap.hEvm || bidId || stage !== "input");
 
   if (inFlow) {
@@ -377,8 +599,33 @@ export function BuyerFlow({
           </div>
         )}
 
-        {!canAct && stage !== "done" && (
+        {(stage === "refunded" || swap.usdcRefundTxHash) && (
+          <div className="stack swap-done">
+            <div className="swap-done-icon">↩</div>
+            <p>USDC refunded — your funds are back in your wallet.</p>
+            {swap.usdcRefundTxHash && <span className="mono-wrap">{swap.usdcRefundTxHash}</span>}
+          </div>
+        )}
+
+        {!canAct && stage !== "done" && stage !== "refunded" && (
           <p className="swap-hint">Connect Base wallet.</p>
+        )}
+
+        {canRefund && (
+          <div className="stack swap-refund">
+            <p className="swap-hint muted">
+              Locked USDC but the swap stalled? Reclaim it on-chain
+              {refundReadyAt && ` (available after ${refundReadyAt})`}.
+            </p>
+            <button
+              type="button"
+              className="link-btn danger-btn"
+              disabled={busy || !evm}
+              onClick={() => void onRefundUsdc()}
+            >
+              {stage === "refunding" ? "Refunding…" : "Refund locked USDC"}
+            </button>
+          </div>
         )}
 
         {log && <pre className="swap-log panel muted">{log}</pre>}
