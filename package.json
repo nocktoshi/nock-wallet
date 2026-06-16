@@ -1,7 +1,7 @@
 {
   "name": "rose-web",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Nockchain web wallet powered by @nockchain/rose-ts (pure-TS rose primitives).",
   "scripts": {
