@@ -57,7 +57,7 @@ export function HomeScreen() {
       <div className="balance-card">
         <div className="muted">Balance</div>
         <div className="balance-amount">
-          {bal.loading && bal.total === 0n ? "…" : formatNock(bal.total)}{" "}
+          {bal.loading && bal.total === 0n ? "…" : formatNock(bal.total, 2)}{" "}
           <span className="balance-unit">	ℕOCK</span>
         </div>
         {nockUsd != null && (
