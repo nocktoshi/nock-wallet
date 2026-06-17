@@ -197,14 +197,64 @@ export async function computeSwapId(
   });
 }
 
-export async function approveAndLock(params: {
+export interface LockUsdcParams {
   seller: Address;
   amountUsdc: string;
   hashlock: Hex;
   timelock: bigint;
   /** Quote token (default USDC). */
   token?: TokenKey;
-}): Promise<{ swapId: Hex; lockHash: Hex; buyer: Address }> {
+}
+
+/** The connected account's ERC20 allowance to the HTLC for this quote token. */
+export async function getUsdcAllowance(token?: TokenKey): Promise<bigint> {
+  const { tokenAddress, htlcAddress } = tokenCtx(token);
+  const { publicClient, account: getAccount } = getEvmClients();
+  const account = await getAccount();
+  return publicClient.readContract({
+    address: tokenAddress,
+    abi: ERC20_ABI,
+    functionName: "allowance",
+    args: [account, htlcAddress],
+  });
+}
+
+/** Does the connected account need to approve the HTLC before locking `amountUsdc`? */
+export async function needsUsdcApproval(amountUsdc: string, token?: TokenKey): Promise<boolean> {
+  const decimals = await getTokenDecimals(token);
+  const amountAtomic = toAtomic(amountUsdc, decimals);
+  if (amountAtomic <= 0n) return false;
+  return (await getUsdcAllowance(token)) < amountAtomic;
+}
+
+/** Step 1 of the lock: approve the HTLC to pull `amountUsdc`. Waits for the
+ *  receipt so the subsequent lock's transferFrom can't race the approval. */
+export async function approveUsdc(amountUsdc: string, token?: TokenKey): Promise<Hex> {
+  const { tokenAddress, htlcAddress, symbol } = tokenCtx(token);
+  const { walletClient: wallet, publicClient, account: getAccount } = getEvmClients();
+  const account = await getAccount();
+  const decimals = await getTokenDecimals(token);
+  const amountAtomic = toAtomic(amountUsdc, decimals);
+  if (amountAtomic <= 0n) throw new Error(`${symbol} amount must be greater than 0`);
+  const approveHash = await wallet.writeContract({
+    address: tokenAddress,
+    abi: ERC20_ABI,
+    functionName: "approve",
+    args: [htlcAddress, amountAtomic],
+    account,
+  });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: approveHash });
+  if (receipt.status !== "success") {
+    throw new Error(`${symbol} approve transaction failed — try again`);
+  }
+  return approveHash;
+}
+
+/** Step 2 of the lock: lock USDC into the HTLC. Assumes the allowance is already
+ *  sufficient (call `approveUsdc` first when `needsUsdcApproval` is true). */
+export async function lockUsdc(
+  params: LockUsdcParams
+): Promise<{ swapId: Hex; lockHash: Hex; buyer: Address }> {
   const { tokenAddress, htlcAddress, symbol } = tokenCtx(params.token);
   const { walletClient: wallet, publicClient, account: getAccount } = getEvmClients();
   const account = await getAccount();
@@ -236,31 +286,6 @@ export async function approveAndLock(params: {
     timelock: params.timelock,
   }, params.token);
 
-  // Approve only when the existing allowance is insufficient, and confirm the
-  // approval is mined+successful BEFORE locking — otherwise lock's transferFrom
-  // reverts (the "transaction was not approved" symptom).
-  const allowance = await publicClient.readContract({
-    address: tokenAddress,
-    abi: ERC20_ABI,
-    functionName: "allowance",
-    args: [account, htlcAddress],
-  });
-  if (allowance < amountAtomic) {
-    const approveHash = await wallet.writeContract({
-      address: tokenAddress,
-      abi: ERC20_ABI,
-      functionName: "approve",
-      args: [htlcAddress, amountAtomic],
-      account,
-    });
-    const approveReceipt = await publicClient.waitForTransactionReceipt({
-      hash: approveHash,
-    });
-    if (approveReceipt.status !== "success") {
-      throw new Error(`${symbol} approve transaction failed — try again`);
-    }
-  }
-
   const lockHash = await wallet.writeContract({
     address: htlcAddress,
     abi: HTLC_ABI,
@@ -275,6 +300,17 @@ export async function approveAndLock(params: {
     throw new Error(`${symbol} lock transaction reverted`);
   }
   return { swapId, lockHash, buyer: account };
+}
+
+/** Approve (only if needed) then lock, in one call — the headless/solver path.
+ *  The interactive UI uses the explicit `approveUsdc` + `lockUsdc` two-step. */
+export async function approveAndLock(
+  params: LockUsdcParams
+): Promise<{ swapId: Hex; lockHash: Hex; buyer: Address }> {
+  if (await needsUsdcApproval(params.amountUsdc, params.token)) {
+    await approveUsdc(params.amountUsdc, params.token);
+  }
+  return lockUsdc(params);
 }
 
 const LOG_CHUNK_BLOCKS = 10n;

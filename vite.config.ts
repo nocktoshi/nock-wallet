@@ -1,9 +1,49 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import basicSsl from '@vitejs/plugin-basic-ssl'
 import { VitePWA } from "vite-plugin-pwa";
 
 import { cloudflare } from "@cloudflare/vite-plugin";
+
+/** Minimal KEY=VALUE parser (quotes + # comments) for .env.example fallback. */
+function parseEnvFile(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq < 0) continue;
+    const key = line.slice(0, eq).trim();
+    let val = line.slice(eq + 1).trim();
+    if (
+      (val.startsWith("'") && val.endsWith("'")) ||
+      (val.startsWith('"') && val.endsWith('"'))
+    ) {
+      val = val.slice(1, -1);
+    }
+    out[key] = val;
+  }
+  return out;
+}
+
+/**
+ * Cloudflare's git build checks out the repo without the git-ignored `.env`, so
+ * every `import.meta.env.VITE_*` would otherwise bake in empty and the deployed
+ * app loses its KV URL / HTLC address / chain id. Fall back to `.env.example`
+ * for any VITE_ var not already provided — a real `.env` file or an explicit
+ * CI/dashboard env var always takes precedence (we only fill what's unset).
+ */
+function applyExampleEnvFallback(mode: string): void {
+  const loaded = loadEnv(mode, process.cwd(), "");
+  const examplePath = resolve(process.cwd(), ".env.example");
+  if (!existsSync(examplePath)) return;
+  const example = parseEnvFile(readFileSync(examplePath, "utf8"));
+  for (const [key, value] of Object.entries(example)) {
+    if (key.startsWith("VITE_") && !loaded[key]) process.env[key] = value;
+  }
+}
 
 /** One dev-proxy entry per RPC preset: `/__rpc/<id>/…` → the upstream host. Lets
  * both endpoints work locally regardless of their CORS policy. Keep in sync with
@@ -33,7 +73,8 @@ function rpcProxy() {
   return proxy;
 }
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  applyExampleEnvFallback(mode);
   return {
     server: {
       port: 5173,

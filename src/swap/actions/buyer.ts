@@ -1,7 +1,15 @@
 import type { Hex, Address } from "viem";
 import { type SwapPublic, assertPreimageMatchesHNock } from "../swap.js";
 import { type TokenKey, tokenInfo } from "../config.js";
-import { approveAndLock, usdcToAtomic, computeSwapId, refundUsdc } from "../evm/htlc.js";
+import {
+  approveUsdc,
+  lockUsdc,
+  needsUsdcApproval,
+  usdcToAtomic,
+  computeSwapId,
+  refundUsdc,
+  type LockUsdcParams,
+} from "../evm/htlc.js";
 import { getPreimageFromWithdrawTx, findPreimageFromSwapWithdraw } from "../evm/preimage.js";
 import type { Digest, Nicks } from "@nockchain/rose-ts";
 
@@ -15,42 +23,55 @@ import type { Digest, Nicks } from "@nockchain/rose-ts";
  */
 
 // ---------------------------------------------------------------------------
-// lockUsdcAction
+// USDC lock — explicit two steps: approve (ERC20) then lock (HTLC)
 // ---------------------------------------------------------------------------
 
-export interface LockUsdcDeps {
-  approveAndLock(params: {
-    seller: Address;
-    amountUsdc: string;
-    hashlock: Hex;
-    timelock: bigint;
-    token?: TokenKey;
-  }): Promise<{ swapId: Hex; lockHash: Hex; buyer: Address }>;
-  htlcAddressSet(token?: TokenKey): boolean;
-}
-
-function defaultLockUsdcDeps(): LockUsdcDeps {
-  return { approveAndLock, htlcAddressSet: (token) => Boolean(tokenInfo(token).htlc) };
-}
-
-export async function lockUsdcAction(
-  input: { swap: SwapPublic },
-  deps?: LockUsdcDeps
-): Promise<{ swapId: Hex; lockTxHash: Hex; swap: SwapPublic }> {
-  const d = deps ?? defaultLockUsdcDeps();
-  if (!d.htlcAddressSet(input.swap.token)) {
+/** Guard the fields every lock/approve step needs before touching the wallet. */
+function assertLockable(swap: SwapPublic): void {
+  if (!tokenInfo(swap.token).htlc) {
     throw new Error(
       "Set VITE_HTLC_ADDRESS in .env (see .env.example), then restart the dev server"
     );
   }
-  if (!input.swap.sellerEth) {
+  if (!swap.sellerEth) {
     throw new Error("Swap is missing the seller's Base address — ask the seller to re-share");
   }
-  if (!input.swap.usdcAmount) throw new Error("Swap is missing the quote amount");
+  if (!swap.usdcAmount) throw new Error("Swap is missing the quote amount");
+}
 
-  const { swapId, lockHash, buyer } = await d.approveAndLock({
-    seller: input.swap.sellerEth,
-    amountUsdc: input.swap.usdcAmount,
+/** Does the buyer still need to approve the HTLC before they can lock? */
+export async function usdcNeedsApprovalAction(input: { swap: SwapPublic }): Promise<boolean> {
+  assertLockable(input.swap);
+  return needsUsdcApproval(input.swap.usdcAmount!, input.swap.token);
+}
+
+/** Step 1: approve the HTLC to pull the quote amount (separate user signature). */
+export async function approveUsdcAction(input: { swap: SwapPublic }): Promise<{ hash: Hex }> {
+  assertLockable(input.swap);
+  const hash = await approveUsdc(input.swap.usdcAmount!, input.swap.token);
+  return { hash };
+}
+
+export interface LockUsdcDeps {
+  lockUsdc(params: LockUsdcParams): Promise<{ swapId: Hex; lockHash: Hex; buyer: Address }>;
+}
+
+function defaultLockUsdcDeps(): LockUsdcDeps {
+  return { lockUsdc };
+}
+
+/** Step 2: lock the USDC. Assumes approval is already in place — call
+ *  `usdcNeedsApprovalAction` + `approveUsdcAction` first when it isn't. */
+export async function lockUsdcAction(
+  input: { swap: SwapPublic },
+  deps?: LockUsdcDeps
+): Promise<{ swapId: Hex; lockTxHash: Hex; swap: SwapPublic }> {
+  assertLockable(input.swap);
+  const d = deps ?? defaultLockUsdcDeps();
+
+  const { swapId, lockHash, buyer } = await d.lockUsdc({
+    seller: input.swap.sellerEth!,
+    amountUsdc: input.swap.usdcAmount!,
     hashlock: input.swap.hEvm,
     timelock: input.swap.usdcTimelock,
     token: input.swap.token,

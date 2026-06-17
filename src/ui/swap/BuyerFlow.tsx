@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type 
 import { useNavigate } from "react-router-dom";
 import type { Hex, Address } from "viem";
 import type { DraftSwap, SwapPublic } from "../../swap/swap.js";
-import { lockUsdcAction, resolvePreimage, refundUsdcAction } from "../../swap/actions/buyer.js";
+import {
+  lockUsdcAction,
+  resolvePreimage,
+  refundUsdcAction,
+  usdcNeedsApprovalAction,
+  approveUsdcAction,
+} from "../../swap/actions/buyer.js";
 import { computeSwapId, getOnchainLock, usdcToAtomic } from "../../swap/evm/htlc.js";
 import { verifyNockLockConfirmed } from "../../swap/nock/balance.js";
 import { getSwapRepository } from "../../swap/app/repo/swap-repo.js";
@@ -121,6 +127,8 @@ export function BuyerFlow({
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState("");
   const [error, setError] = useState("");
+  // null = not yet checked; true = ERC20 approval still needed before locking.
+  const [needsApproval, setNeedsApproval] = useState<boolean | null>(null);
 
   const swapPollInFlight = useRef(false);
   const actionInFlight = useRef(false);
@@ -318,6 +326,32 @@ export function BuyerFlow({
     }
   }, [quote, setSwap]);
 
+  // Re-evaluate approval whenever the swap changes.
+  useEffect(() => {
+    setNeedsApproval(null);
+  }, [swap.hEvm]);
+
+  // Once ready to lock, check on-chain whether the buyer still needs to approve
+  // the HTLC — the lock is then explicitly two steps (approve, then lock).
+  useEffect(() => {
+    if (stage !== "ready-to-lock" || needsApproval !== null) return;
+    if (!evm || !swap.sellerEth || !swap.usdcAmount) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const need = await usdcNeedsApprovalAction({ swap: swap as SwapPublic });
+        if (alive) setNeedsApproval(need);
+      } catch {
+        // Default to showing Approve if we can't read the allowance — approving
+        // when already approved just re-sets it; locking unapproved would revert.
+        if (alive) setNeedsApproval(true);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [stage, needsApproval, evm, swap]);
+
   async function onPlaceOrder(): Promise<void> {
     if (busy) return;
     setBusy(true);
@@ -353,6 +387,28 @@ export function BuyerFlow({
     } catch (e) {
       logErr(e);
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onApproveUsdc(): Promise<void> {
+    if (busy || !swap.hEvm) return;
+    if (!evm) {
+      setError("Connect your Base wallet to approve.");
+      return;
+    }
+    setBusy(true);
+    actionInFlight.current = true;
+    setError("");
+    try {
+      logMsg("Approve USDC spending in your Base wallet…");
+      const { hash } = await approveUsdcAction({ swap: swap as SwapPublic });
+      logMsg(`USDC approved (tx ${hash}). Now lock to continue.`);
+      setNeedsApproval(false);
+    } catch (e) {
+      logErr(e);
+    } finally {
+      actionInFlight.current = false;
       setBusy(false);
     }
   }
@@ -570,14 +626,40 @@ export function BuyerFlow({
           </p>
         )}
 
-        {stage === "ready-to-lock" && (
+        {stage === "locking" && (
+          <div className="swap-hint row gap">
+            <Spinner label="Locking USDC…" />
+          </div>
+        )}
+
+        {stage === "ready-to-lock" && needsApproval === null && canAct && (
+          <div className="swap-hint row gap">
+            <Spinner label="Checking USDC approval…" />
+          </div>
+        )}
+
+        {stage === "ready-to-lock" && needsApproval === true && (
+          <div className="stack">
+            <p className="swap-hint muted">Step 1 of 2 — approve USDC, then lock it.</p>
+            <button
+              type="button"
+              className="primary big"
+              disabled={busy || !canAct}
+              onClick={() => void onApproveUsdc()}
+            >
+              {busy ? "Approving…" : `Approve ${swap.usdcAmount} USDC`}
+            </button>
+          </div>
+        )}
+
+        {stage === "ready-to-lock" && needsApproval === false && (
           <button
             type="button"
             className="primary big"
             disabled={busy || !canAct}
             onClick={() => void onLockUsdc()}
           >
-            {busy ? "Opening wallet…" : `Lock ${swap.usdcAmount} USDC`}
+            {busy ? "Locking…" : `Lock ${swap.usdcAmount} USDC`}
           </button>
         )}
 
