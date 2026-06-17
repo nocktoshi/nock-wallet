@@ -61,7 +61,7 @@ export function isWalletConnectConfigured(): boolean {
 /** Lazily create (or reuse) the singleton EthereumProvider. */
 async function initWcProvider(): Promise<WcProvider> {
   if (wcProvider) return wcProvider;
-  const projectId = walletConnectProjectId();
+  const projectId = walletConnectProjectId() || '56b8c5a9471e0860a63a1a60eda24ef0';
   if (!projectId) {
     throw new Error(
       "WalletConnect is not configured — set VITE_WALLETCONNECT_PROJECT_ID"
