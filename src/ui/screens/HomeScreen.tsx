@@ -7,10 +7,10 @@ import { shortMiddle, useCopy } from "../format.js";
 import type { TxRecord, TxStatus } from "../../wallet/history.js";
 import { useSwapsInProgress } from "../swap/useSwapsInProgress.js";
 import { SwapProgressList } from "../swap/SwapProgressList.js";
-import logo from "../../../public/app-icon.png"
+import { PlusIcon } from "../components/icons.js";
 
 export function HomeScreen() {
-  const { active, accounts, wallet, lock } = useSession();
+  const { active, accounts, wallet } = useSession();
   const navigate = useNavigate();
   const bal = useBalance(active?.pkh);
   const nockUsd = useNockUsd();
@@ -22,16 +22,6 @@ export function HomeScreen() {
 
   return (
     <div className="screen home">
-      <div className="home-top">
-        <img className="logo" src={logo}></img>
-        <h3>ℕock 𝕎allet</h3>
-        <button className="icon-btn" title="Settings" onClick={() => navigate("/settings")}>
-            ⚙
-          </button>
-          <button className="icon-btn" title="Lock" onClick={lock}>
-            🔒
-          </button>
-      </div>
       <header className="home-top">
         <select
           className="account-select"
@@ -47,10 +37,10 @@ export function HomeScreen() {
             ))}
         </select>
         <div className="home-actions">
-          <button className="icon-btn" title="Add account" onClick={() => void wallet.addAccount()}>
-            +
+          <button className="icon-btn" title="Add account" aria-label="Add account" onClick={() => void wallet.addAccount()}>
+            <PlusIcon />
           </button>
-          
+
         </div>
       </header>
 

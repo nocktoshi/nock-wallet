@@ -272,9 +272,58 @@ input[type="number"] {
   gap: 6px;
 }
 .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
   width: 3rem;
   height: 3rem;
+  color: var(--fg);
+}
+.icon-btn:hover {
+  color: var(--accent);
+}
+
+/* Persistent brand header (shown across every unlocked flow). */
+.app-shell {
+  width: 100%;
+  max-width: 460px;
+  margin: 0 auto;
+}
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 20px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.app-logo {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.6rem;
+}
+.app-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.app-header-actions {
+  display: flex;
+  gap: 4px;
 }
 .balance-card {
   background: var(--panel);

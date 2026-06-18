@@ -10,6 +10,7 @@ import { SwapScreen } from "./screens/SwapScreen.js";
 import { BridgePopup } from "./screens/bridge/BridgePopup.js";
 import { Spinner } from "./components/primitives.js";
 import { InstallPrompt } from "./components/InstallPrompt.js";
+import { AppHeader } from "./components/AppHeader.js";
 
 export function App() {
   return (
@@ -51,16 +52,19 @@ function GateContent({ status }: { status: ReturnType<typeof useSession>["status
   if (status === "uninitialized") return <Onboarding />;
   if (status === "locked") return <LockedScreen />;
 
-  // unlocked
+  // unlocked — the brand header persists across every flow below it.
   return (
-    <Routes>
-      <Route path="/" element={<HomeScreen />} />
-      <Route path="/send" element={<SendScreen />} />
-      <Route path="/receive" element={<ReceiveScreen />} />
-      <Route path="/settings" element={<SettingsScreen />} />
-      <Route path="/swap" element={<SwapScreen />} />
-      <Route path="/swap/:id" element={<SwapScreen />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <div className="app-shell">
+      <AppHeader />
+      <Routes>
+        <Route path="/" element={<HomeScreen />} />
+        <Route path="/send" element={<SendScreen />} />
+        <Route path="/receive" element={<ReceiveScreen />} />
+        <Route path="/settings" element={<SettingsScreen />} />
+        <Route path="/swap" element={<SwapScreen />} />
+        <Route path="/swap/:id" element={<SwapScreen />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </div>
   );
 }
