@@ -8,7 +8,7 @@
 # price feed, and WalletConnect/Reown — widen those (only) if a third-party
 # endpoint is blocked in the console.
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; manifest-src 'self'; worker-src 'self'; connect-src 'self' https://cloudflareinsights.com https://rpc.nockbox.org https://rpc.nockchain.net https://api.atomicnock.com https://api.coingecko.com wss://relay.walletconnect.com wss://*.walletconnect.org https://*.walletconnect.com https://*.walletconnect.org https://*.web3modal.org https://*.reown.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; upgrade-insecure-requests
+  Content-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self'; manifest-src 'self'; worker-src 'self'; connect-src 'self' https://cloudflareinsights.com https://rpc.nockbox.org https://rpc.nockchain.net https://api.atomicnock.com https://api.coingecko.com wss://relay.walletconnect.com wss://*.walletconnect.org https://*.walletconnect.com https://*.walletconnect.org https://*.web3modal.org https://*.reown.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; upgrade-insecure-requests
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   X-Frame-Options: DENY
