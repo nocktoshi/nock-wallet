@@ -30,28 +30,6 @@ export function fromBase64(b64: string): Uint8Array {
   return out;
 }
 
-/** Derive a non-extractable AES-GCM key from a password via PBKDF2-HMAC-SHA256. */
-export async function deriveAesKey(
-  password: string,
-  salt: Uint8Array,
-  iterations: number
-): Promise<CryptoKey> {
-  const baseKey = await crypto.subtle.importKey(
-    "raw",
-    te.encode(password),
-    "PBKDF2",
-    false,
-    ["deriveKey"]
-  );
-  return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: salt as BufferSource, iterations, hash: "SHA-256" },
-    baseKey,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"]
-  );
-}
-
 /** Import 32 raw bytes (e.g. a YubiKey-PRF-derived KEK) as an AES-GCM key. */
 export async function importAesKey(raw: Uint8Array): Promise<CryptoKey> {
   return crypto.subtle.importKey("raw", raw as BufferSource, "AES-GCM", false, [
