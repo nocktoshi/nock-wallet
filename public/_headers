@@ -1,12 +1,14 @@
 # Security headers for the Cloudflare Workers/Pages assets deployment.
 # CSP is the primary XSS defense for a web wallet: an injected script would
 # otherwise run in the page where the unlocked DEK + mnemonic live. The prod
-# bundle has no eval/new Function/WASM and no inline <script>, so script-src
-# can be a strict 'self'. connect-src/frame-src/img-src allowlist the RPC
-# presets, the swap API, the price feed, and WalletConnect/Reown — widen those
-# (only) if a third-party endpoint is blocked in the console.
+# bundle has no eval/new Function/WASM and no inline <script>, so script-src is
+# 'self' plus only Cloudflare's auto-injected Web Analytics beacon
+# (static.cloudflareinsights.com; it POSTs RUM to cloudflareinsights.com).
+# connect-src/frame-src/img-src allowlist the RPC presets, the swap API, the
+# price feed, and WalletConnect/Reown — widen those (only) if a third-party
+# endpoint is blocked in the console.
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; manifest-src 'self'; worker-src 'self'; connect-src 'self' https://rpc.nockbox.org https://rpc.nockchain.net https://api.atomicnock.com https://api.coingecko.com wss://relay.walletconnect.com https://*.walletconnect.com https://*.walletconnect.org https://*.reown.com; frame-src https://verify.walletconnect.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; upgrade-insecure-requests
+  Content-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; manifest-src 'self'; worker-src 'self'; connect-src 'self' https://cloudflareinsights.com https://rpc.nockbox.org https://rpc.nockchain.net https://api.atomicnock.com https://api.coingecko.com wss://relay.walletconnect.com wss://*.walletconnect.org https://*.walletconnect.com https://*.walletconnect.org https://*.web3modal.org https://*.reown.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; upgrade-insecure-requests
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   X-Frame-Options: DENY
