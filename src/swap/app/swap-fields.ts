@@ -18,6 +18,9 @@ export const BUYER_FIELDS = [
   "usdcRefundTxHash",
 ] as const;
 
+/** Either participant may write (solver publishes progress for wallet UIs). */
+export const STATUS_FIELDS = ["solverStatus"] as const;
+
 export type SwapRole = "seller" | "buyer";
 
 /** Pick a party's progress fields out of an encoded swap object. */

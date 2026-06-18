@@ -37,7 +37,9 @@ export async function createPrfCredential(opts: {
   const cred = (await navigator.credentials.create({
     publicKey: {
       challenge: randomBytes(32) as BufferSource,
-      rp: { name: opts.rpName },
+      // Pin rp.id to the exact host (matches the WebAuthn default, so existing
+      // credentials still verify) — prevents a sibling subdomain from using it.
+      rp: { name: opts.rpName, id: window.location.hostname },
       user: {
         id: randomBytes(16) as BufferSource,
         name: opts.userName,
@@ -49,8 +51,10 @@ export async function createPrfCredential(opts: {
       ],
       // No authenticatorAttachment: allow BOTH platform passkeys (Touch ID /
       // Windows Hello) and roaming YubiKeys. residentKey "preferred" makes
-      // platform credentials discoverable passkeys.
-      authenticatorSelection: { userVerification: "preferred", residentKey: "preferred" },
+      // platform credentials discoverable passkeys. userVerification "required"
+      // binds unlock to a biometric/PIN (a wallet shouldn't unlock on presence
+      // alone) — authenticators without UV are rejected at create/unlock.
+      authenticatorSelection: { userVerification: "required", residentKey: "preferred" },
       timeout: 60_000,
       extensions: { prf: {} } as AuthenticationExtensionsClientInputs,
     },
@@ -75,7 +79,7 @@ export async function evaluatePrf(
         type: "public-key" as const,
         id: id as BufferSource,
       })),
-      userVerification: "preferred",
+      userVerification: "required",
       timeout: 60_000,
       extensions: {
         prf: { eval: { first: PRF_SALT } },

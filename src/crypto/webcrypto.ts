@@ -1,12 +1,20 @@
-/** Thin WebCrypto helpers (AES-GCM + PBKDF2 + base64). Browser, Node 20+, and
- * jsdom all expose `globalThis.crypto.subtle`, so no polyfill is needed. */
-
-const te = new TextEncoder();
+/** Thin WebCrypto helpers (AES-GCM + base64). Browser, Node 20+, and jsdom all
+ * expose `globalThis.crypto.subtle`, so no polyfill is needed. */
 
 export function randomBytes(n: number): Uint8Array {
   const b = new Uint8Array(n);
   crypto.getRandomValues(b);
   return b;
+}
+
+/** A fresh NON-EXTRACTABLE AES-GCM key (e.g. to wrap the DEK for a kept session).
+ *  Non-extractable means an XSS can use it in-page but cannot exfiltrate the raw
+ *  key material for offline/elsewhere use. */
+export function generateWrappingKey(): Promise<CryptoKey> {
+  return crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+    "encrypt",
+    "decrypt",
+  ]);
 }
 
 export function toBase64(bytes: Uint8Array): string {

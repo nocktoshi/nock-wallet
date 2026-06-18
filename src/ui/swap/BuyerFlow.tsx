@@ -15,7 +15,7 @@ import { getSwapRepository } from "../../swap/app/repo/swap-repo.js";
 import { useSwapSession } from "./session.js";
 import { SwapStepper } from "./SwapStepper.js";
 import { belowMinNock, minNockAmountError, nicksToNock } from "./util.js";
-import { ErrorText, Spinner } from "../components/primitives.js";
+import { ErrorText, SwapWaiting } from "../components/primitives.js";
 import { useUsdcBuyQuote } from "./useUsdcBuyQuote.js";
 import { NICKS_PER_NOCK } from "../../nock/units.js";
 
@@ -611,31 +611,19 @@ export function BuyerFlow({
         </dl>
 
         {stage === "waiting-fill" && (
-          <div className="swap-hint row gap">
-            <Spinner label="Checking with solver…" />
-          </div>
+          <SwapWaiting label="Checking with solver" />
         )}
         {stage === "verifying" && (
-          <p className="swap-hint">
-            Solver locked NOCK on-chain. Verifying the lock before you pay USDC…
-          </p>
+          <SwapWaiting label="Solver locked NOCK — verifying before you pay USDC" />
         )}
         {stage === "waiting-reveal" && (
-          <p className="swap-hint">
-            USDC locked. Solver is finalizing and releasing the preimage (~1 min).
-          </p>
+          <SwapWaiting label="USDC locked — solver is releasing the preimage" />
         )}
 
-        {stage === "locking" && (
-          <div className="swap-hint row gap">
-            <Spinner label="Locking USDC…" />
-          </div>
-        )}
+        {stage === "locking" && <SwapWaiting label="Locking USDC" />}
 
         {stage === "ready-to-lock" && needsApproval === null && canAct && (
-          <div className="swap-hint row gap">
-            <Spinner label="Checking USDC approval…" />
-          </div>
+          <SwapWaiting label="Checking USDC approval" />
         )}
 
         {stage === "ready-to-lock" && needsApproval === true && (
@@ -663,6 +651,8 @@ export function BuyerFlow({
           </button>
         )}
 
+        {stage === "claiming" && <SwapWaiting label="Claiming NOCK" />}
+
         {stage === "ready-to-claim" && (
           <button
             type="button"
@@ -670,7 +660,7 @@ export function BuyerFlow({
             disabled={busy || !canAct}
             onClick={() => void onClaimNock()}
           >
-            {busy ? "Signing…" : `Claim ${nicksToNock(swap.nockGift)} NOCK`}
+            {`Claim ${nicksToNock(swap.nockGift)} NOCK`}
           </button>
         )}
 
@@ -693,7 +683,9 @@ export function BuyerFlow({
           <p className="swap-hint">Connect Base wallet.</p>
         )}
 
-        {canRefund && (
+        {stage === "refunding" && <SwapWaiting label="Refunding USDC" />}
+
+        {canRefund && stage !== "refunding" && (
           <div className="stack swap-refund">
             <p className="swap-hint muted">
               Locked USDC but the swap stalled? Reclaim it on-chain
@@ -705,7 +697,7 @@ export function BuyerFlow({
               disabled={busy || !evm}
               onClick={() => void onRefundUsdc()}
             >
-              {stage === "refunding" ? "Refunding…" : "Refund locked USDC"}
+              Refund locked USDC
             </button>
           </div>
         )}
@@ -756,10 +748,7 @@ export function BuyerFlow({
       </div>
 
       {quoting ? (
-        <p className="swap-rate quoting" role="status" aria-live="polite">
-          Finding your best rate
-          <span className="quote-dots" aria-hidden="true"><span></span><span></span><span></span></span>
-        </p>
+        <SwapWaiting label="Finding your best rate" />
       ) : online === false ? (
         <p className="swap-rate muted">Solver offline — try again shortly</p>
       ) : quoteReady && quote.pricePerNock != null ? (

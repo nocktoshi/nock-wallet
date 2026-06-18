@@ -12,17 +12,29 @@ import {
   type PrfMaterial,
   createVaultWithPrf,
   unlockWithPrf,
+  decryptPayloadWithDek,
   reencryptPayload,
   addPrfWrap,
   removeKeyringEntry,
   prfCredentialIds,
 } from "../crypto/vault.js";
+import {
+  aesGcmDecrypt,
+  aesGcmEncrypt,
+  fromBase64,
+  generateWrappingKey,
+  randomBytes,
+  toBase64,
+} from "../crypto/webcrypto.js";
 import { normalizeMnemonic, validateMnemonic } from "../crypto/mnemonic.js";
 import { deriveExtendedKey, pkhFromExtendedKey } from "../nock/address.js";
 import {
+  clearSessionWrapKey,
   clearStoredWallet,
   hasStoredWallet,
+  loadSessionWrapKey,
   loadStoredWallet,
+  saveSessionWrapKey,
   saveStoredWallet,
 } from "./storage.js";
 import type {
@@ -35,6 +47,17 @@ import type {
 } from "./types.js";
 
 const DEFAULT_AUTO_LOCK_MIN = 5;
+/** sessionStorage key holding the DEK when auto-lock is "never" (0). */
+const SESSION_DEK_KEY = "nw.session.dek";
+
+/** sessionStorage, but tolerant of environments where it's unavailable. */
+function sessionStore(): Storage | null {
+  try {
+    return typeof sessionStorage !== "undefined" ? sessionStorage : null;
+  } catch {
+    return null;
+  }
+}
 
 interface DerivedKey {
   ext: ExtendedKey;
@@ -105,14 +128,54 @@ export class WalletStore {
     this.emit("unlocked");
   }
 
+  /**
+   * Restore a previously unlocked session after a page refresh — only when the
+   * user chose "never" auto-lock. The DEK is kept WRAPPED under a non-extractable
+   * key (sessionStorage holds only the wrapped blob; the key lives in IDB), so it
+   * can't be exfiltrated. Returns true if now unlocked. Cleared by lock(), reset(),
+   * or tab close (which drops the sessionStorage blob).
+   */
+  async tryRestoreSession(): Promise<boolean> {
+    if (this.isUnlocked()) return true;
+    const raw = sessionStore()?.getItem(SESSION_DEK_KEY);
+    if (!raw) return false;
+    let dek: Uint8Array | null = null;
+    try {
+      const { iv, ct } = JSON.parse(raw) as { iv: string; ct: string };
+      const wrapKey = await loadSessionWrapKey();
+      if (!wrapKey) {
+        this.clearSessionSync();
+        return false;
+      }
+      dek = await aesGcmDecrypt(wrapKey, fromBase64(iv), fromBase64(ct));
+      const stored = await loadStoredWallet();
+      if (!stored) {
+        await this.clearSession();
+        return false;
+      }
+      const payload = await decryptPayloadWithDek(dek, stored.vault);
+      this.setUnlocked(decodePayload(payload), stored.meta, dek, stored.vault);
+      this.emit("unlocked");
+      return true;
+    } catch {
+      // Stale/invalid session (vault rotated, key gone, decrypt failed) — drop it.
+      dek?.fill(0);
+      await this.clearSession().catch(() => {});
+      return false;
+    }
+  }
+
   /** Wipe all secret material from memory. */
   lock(): void {
+    this.dek?.fill(0); // best-effort zeroization before drop
     this.payload = null;
     this.dek = null;
     this.envelope = null;
     this.derived.clear();
     if (this.lockTimer) clearTimeout(this.lockTimer);
     this.lockTimer = null;
+    this.clearSessionSync(); // sync: blocks restore immediately
+    void clearSessionWrapKey(); // async IDB cleanup
     this.emit("locked");
   }
 
@@ -265,11 +328,49 @@ export class WalletStore {
     return this.meta?.autoLockMinutes ?? DEFAULT_AUTO_LOCK_MIN;
   }
 
+  /** Persist (or clear) the kept-session DEK so a refresh restores without a
+   *  passkey — gated on the user's explicit "never" (0) auto-lock choice. The DEK
+   *  is wrapped under a NON-EXTRACTABLE key (kept in IDB); sessionStorage holds
+   *  only the wrapped blob, so an XSS can't exfiltrate the raw key. Cleared on
+   *  lock/close. Best-effort (fire-and-forget); a refresh before it lands just
+   *  re-prompts. CSP remains the primary XSS defense. */
+  private async persistSession(): Promise<void> {
+    const store = sessionStore();
+    if (!store || !this.dek) return;
+    if (this.getAutoLockMinutes() !== 0) {
+      this.clearSessionSync();
+      void clearSessionWrapKey();
+      return;
+    }
+    try {
+      const wrapKey = await generateWrappingKey();
+      const iv = randomBytes(12);
+      const ct = await aesGcmEncrypt(wrapKey, iv, this.dek);
+      await saveSessionWrapKey(wrapKey);
+      store.setItem(SESSION_DEK_KEY, JSON.stringify({ iv: toBase64(iv), ct: toBase64(ct) }));
+    } catch {
+      this.clearSessionSync();
+      void clearSessionWrapKey();
+    }
+  }
+
+  /** Synchronous part of clearing — removes the sessionStorage blob, which alone
+   *  is enough to block a restore (it also needs the IDB key). */
+  private clearSessionSync(): void {
+    sessionStore()?.removeItem(SESSION_DEK_KEY);
+  }
+
+  private async clearSession(): Promise<void> {
+    this.clearSessionSync();
+    await clearSessionWrapKey();
+  }
+
   async setAutoLockMinutes(minutes: number): Promise<void> {
     const meta = this.requireMeta();
     meta.autoLockMinutes = Math.max(0, Math.floor(minutes));
     await this.persistCurrent();
     this.armAutoLock();
+    void this.persistSession();
     this.emit("changed");
   }
 
@@ -298,6 +399,7 @@ export class WalletStore {
     this.envelope = envelope;
     this.derived.clear();
     this.armAutoLock();
+    void this.persistSession();
   }
 
   private deriveFor(index: number): DerivedKey {

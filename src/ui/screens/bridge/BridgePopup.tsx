@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { NockchainTx } from "@nockchain/rose-ts";
 import { useSession } from "../../session.js";
 import {
   BridgeHost,
@@ -7,6 +8,8 @@ import {
   describeRequest,
   type PendingRequest,
 } from "../../../bridge/host.js";
+import { summarizeTx } from "../../../bridge/tx-summary.js";
+import { formatNock } from "../../../nock/units.js";
 import { shortMiddle } from "../../format.js";
 import { ErrorText, Screen, Spinner } from "../../components/primitives.js";
 import { PasskeyUnlock } from "../../components/YubiKeyUnlock.js";
@@ -108,7 +111,11 @@ function Approval({
 
   return (
     <Screen title={title} subtitle={<OriginBadge origin={req.origin} />}>
-      <div className="approval-detail mono-wrap">{detail || "—"}</div>
+      {req.method === "nock_signTx" ? (
+        <TxSummaryView tx={(req.params as { tx?: NockchainTx } | null)?.tx} />
+      ) : (
+        <div className="approval-detail mono-wrap">{detail || "—"}</div>
+      )}
       <ErrorText>{error}</ErrorText>
       <div className="row gap">
         <button onClick={reject} disabled={busy}>
@@ -119,6 +126,49 @@ function Approval({
         </button>
       </div>
     </Screen>
+  );
+}
+
+/** "What you're signing": decoded outputs, total, and fee — not a blind sign. */
+function TxSummaryView({ tx }: { tx?: NockchainTx }) {
+  const s = useMemo(() => (tx ? summarizeTx(tx) : null), [tx]);
+  if (!s) return <p className="error-text">No transaction supplied.</p>;
+  return (
+    <div className="approval-tx panel">
+      {s.decoded ? (
+        <>
+          <div className="approval-tx-row">
+            <span className="muted">Total leaving</span>
+            <strong>{formatNock(s.totalOutNicks ?? 0n, 6)} ℕOCK</strong>
+          </div>
+          {s.outputs.map((o, i) => (
+            <div className="approval-tx-row" key={i}>
+              <span className="muted">Output #{i + 1}</span>
+              <span>{formatNock(o.amountNicks, 6)} ℕOCK</span>
+            </div>
+          ))}
+        </>
+      ) : (
+        <p className="error-text">
+          Could not decode this transaction. Approve only if you trust this site.
+        </p>
+      )}
+      {s.feeNicks != null && (
+        <div className="approval-tx-row">
+          <span className="muted">Network fee</span>
+          <span>{formatNock(s.feeNicks, 6)} ℕOCK</span>
+        </div>
+      )}
+      {s.txId && (
+        <div className="approval-tx-row">
+          <span className="muted">Tx id</span>
+          <span className="mono-wrap">{shortMiddle(s.txId, 10, 8)}</span>
+        </div>
+      )}
+      <p className="muted approval-tx-note">
+        Recipient addresses aren't decoded in-wallet — verify the requesting site.
+      </p>
+    </div>
   );
 }
 

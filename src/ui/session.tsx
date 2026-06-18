@@ -31,6 +31,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [tick, setTick] = useState(0);
 
   const refresh = useCallback(async () => {
+    // On (re)load the in-memory key is gone; if the user chose "never" auto-lock,
+    // restore the session from this tab's sessionStorage instead of re-prompting.
+    if (!wallet.isUnlocked()) {
+      try {
+        await wallet.tryRestoreSession();
+      } catch {
+        /* fall through to the locked prompt */
+      }
+    }
     if (wallet.isUnlocked()) setStatus("unlocked");
     else setStatus((await WalletStore.isInitialized()) ? "locked" : "uninitialized");
     setTick((t) => t + 1);

@@ -49,6 +49,8 @@ export interface SwapPublic {
   nockRefundTxId?: string;
   /** Worker optimistic-concurrency generation (read-only from API). */
   version?: number;
+  /** Solver-published status for wallet UIs (e.g. block confirmation progress). */
+  solverStatus?: string;
 }
 
 /**
@@ -108,6 +110,7 @@ export function encodeSwapParams(params: SwapPublic): string {
     ...(params.usdcRefundTxHash ? { usdcRefundTxHash: params.usdcRefundTxHash } : {}),
     ...(params.nockRefundTxId ? { nockRefundTxId: params.nockRefundTxId } : {}),
     ...(typeof params.version === "number" ? { version: params.version } : {}),
+    ...(params.solverStatus ? { solverStatus: params.solverStatus } : {}),
     nockGift: params.nockGift.toString(),
     nockRefundHeight: params.nockRefundHeight.toString(),
     usdcTimelock: params.usdcTimelock.toString(),
@@ -156,6 +159,7 @@ export function decodeSwapParams(json: string): SwapPublic {
     usdcRefundTxHash: str(raw.usdcRefundTxHash),
     nockRefundTxId: str(raw.nockRefundTxId),
     version: raw.version != null ? Number(raw.version) : undefined,
+    solverStatus: str(raw.solverStatus),
   };
 }
 

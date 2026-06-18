@@ -7,10 +7,19 @@ import { secretStore } from "../../swap/app/storage/secret-store.js";
 import { getSwapRepository } from "../../swap/app/repo/swap-repo.js";
 import { useSwapSession } from "./session.js";
 import { SwapStepper } from "./SwapStepper.js";
-import { belowMinNock, minNockAmountError, nicksToNock, nockToNicks } from "./util.js";
-import { ErrorText, Spinner } from "../components/primitives.js";
+import {
+  belowMinNock,
+  minNockAmountError,
+  nicksToNock,
+  nockToNicks,
+  sellFragmentedBalanceError,
+  sellInsufficientBalanceError,
+} from "./util.js";
+import { ErrorText, SwapWaiting } from "../components/primitives.js";
 import { useNockSellQuote } from "./useNockSellQuote.js";
-import { NICKS_PER_NOCK } from "../../nock/units.js";
+import { NICKS_PER_NOCK, formatNock } from "../../nock/units.js";
+import { useBalance } from "../hooks.js";
+import { checkSellAffordability } from "../../swap/nock/balance.js";
 
 const SWAP_POLL_MS = 12_000;
 
@@ -55,6 +64,7 @@ export function SellerFlow({
   const navigate = useNavigate();
   const repo = useMemo(() => getSwapRepository(), []);
   const { nock, evm, lockNockAction, fetchCurrentBlockHeight } = useSwapSession();
+  const bal = useBalance(nock?.pkh);
 
   const [nockAmt, setNockAmt] = useState(() => (swap.nockGift ? nicksToNock(swap.nockGift) : ""));
   const { loading: quoting, quote, error: quoteError, online } = useNockSellQuote(nockAmt);
@@ -76,6 +86,18 @@ export function SellerFlow({
   const amtNock = parseFloat(nockAmt);
   const overMax = maxNock != null && Number.isFinite(amtNock) && amtNock > maxNock;
   const underMin = belowMinNock(amtNock);
+  const giftNicks = nockToNicks(nockAmt);
+  const sellAffordability =
+    nock?.pkh && giftNicks > 0n && !bal.loading
+      ? checkSellAffordability(
+          bal.notes.map((n) => ({ note: n.note, assets: n.assets })),
+          giftNicks,
+          nock.pkh
+        )
+      : null;
+  const overBalance = sellAffordability?.insufficientTotal ?? false;
+  const fragmented = sellAffordability?.fragmented ?? false;
+  const largestNicks = bal.notes.reduce((m, n) => (n.assets > m ? n.assets : m), 0n);
 
   // Resume from /swap/:id
   useEffect(() => {
@@ -158,6 +180,21 @@ export function SellerFlow({
       if (belowMinNock(amt)) throw new Error(minNockAmountError());
       if (maxNock != null && amt > maxNock) {
         throw new Error(`Solver can only pay for ~${maxNock.toFixed(2)} NOCK right now.`);
+      }
+      const gift = nockToNicks(nockAmt);
+      const affordability = nock?.pkh
+        ? checkSellAffordability(
+            bal.notes.map((n) => ({ note: n.note, assets: n.assets })),
+            gift,
+            nock.pkh
+          )
+        : null;
+      if (affordability?.insufficientTotal) {
+        throw new Error(sellInsufficientBalanceError(gift, bal.total, affordability));
+      }
+      if (affordability?.fragmented) {
+        const largest = bal.notes.reduce((m, n) => (n.assets > m ? n.assets : m), 0n);
+        throw new Error(sellFragmentedBalanceError(gift, bal.total, largest, affordability));
       }
 
       const height = await fetchCurrentBlockHeight();
@@ -260,15 +297,13 @@ export function SellerFlow({
         </dl>
 
         {stage === "waiting-claim" && (
-          <div className="swap-hint row gap">
-            <Spinner label="Checking with solver…" />
-          </div>
+          <SwapWaiting label="Checking with solver" />
         )}
         {stage === "confirming-lock" && (
-          <p className="swap-hint">
-            NOCK locked on-chain. Solver is confirming your lock and paying USDC (~2–5 min).
-          </p>
+          <SwapWaiting label="NOCK locked — solver is confirming and paying USDC" />
         )}
+
+        {stage === "locking" && <SwapWaiting label="Signing and locking NOCK" />}
 
         {stage === "ready-to-lock" && (
           <button
@@ -277,9 +312,11 @@ export function SellerFlow({
             disabled={busy || !canAct}
             onClick={() => void onLockNock()}
           >
-            {busy ? "Signing…" : `Lock ${nicksToNock(swap.nockGift)} NOCK`}
+            {`Lock ${nicksToNock(swap.nockGift)} NOCK`}
           </button>
         )}
+
+        {stage === "withdrawing" && <SwapWaiting label="Withdrawing USDC" />}
 
         {stage === "ready-to-withdraw" && (
           <button
@@ -288,7 +325,7 @@ export function SellerFlow({
             disabled={busy || !canAct}
             onClick={() => void onWithdraw()}
           >
-            {busy ? "Withdrawing…" : `Withdraw ${swap.usdcAmount} USDC`}
+            {`Withdraw ${swap.usdcAmount} USDC`}
           </button>
         )}
 
@@ -334,19 +371,23 @@ export function SellerFlow({
         <div className="swap-panel">
           <span className="swap-panel-label">You receive</span>
           <div className="swap-panel-row">
-            <input
-              className="swap-amount"
-              readOnly
-              placeholder={quoting ? "…" : "0"}
-              value={quoting ? "" : estUsd != null ? estUsd.toFixed(2) : ""}
-            />
+            {quoting ? (
+              <div className="swap-amount-skeleton" aria-hidden="true" />
+            ) : (
+              <input
+                className="swap-amount"
+                readOnly
+                placeholder="0"
+                value={estUsd != null ? estUsd.toFixed(2) : ""}
+              />
+            )}
             <span className="swap-token-pill">USDC</span>
           </div>
         </div>
       </div>
 
       {quoting ? (
-        <p className="swap-rate quoting muted">Getting quote…</p>
+        <SwapWaiting label="Finding your best rate" />
       ) : online === false ? (
         <p className="swap-rate muted">Solver offline — try again shortly</p>
       ) : quoteReady && quote.pricePerNock != null ? (
@@ -363,6 +404,24 @@ export function SellerFlow({
         </p>
       )}
       {underMin && nockAmt && <p className="swap-rate swap-warn">{minNockAmountError()}</p>}
+      {overBalance && sellAffordability && (
+        <p className="swap-rate swap-warn">
+          {sellInsufficientBalanceError(giftNicks, bal.total, sellAffordability)}
+        </p>
+      )}
+      {fragmented && sellAffordability && (
+        <p className="swap-rate swap-warn">
+          {sellFragmentedBalanceError(giftNicks, bal.total, largestNicks, sellAffordability)}
+        </p>
+      )}
+      {nock && !bal.loading && (
+        <p className="swap-rate muted">
+          Available: {formatNock(bal.total, 2)} NOCK
+          {sellAffordability && giftNicks > 0n
+            ? ` · ~${formatNock(sellAffordability.feeNicks, 4)} lock fee`
+            : ""}
+        </p>
+      )}
 
       <button
         type="button"
@@ -370,11 +429,14 @@ export function SellerFlow({
         disabled={
           busy ||
           quoting ||
+          bal.loading ||
           !canAct ||
           !quoteReady ||
           !nockAmt ||
           overMax ||
-          underMin
+          underMin ||
+          overBalance ||
+          fragmented
         }
         onClick={() => void onPlaceOrder()}
       >

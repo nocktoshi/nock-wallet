@@ -100,6 +100,15 @@ export async function unlockWithPrf(
   return { payload, dek };
 }
 
+/** Decrypt the payload with a known DEK — used to restore a persisted unlocked
+ *  session (the DEK was kept in sessionStorage) without another passkey prompt. */
+export async function decryptPayloadWithDek(
+  dek: Uint8Array,
+  vault: EnvelopeVault
+): Promise<Uint8Array> {
+  return dec(await dekToKey(dek), vault.payload);
+}
+
 /** Re-encrypt the payload under the in-memory DEK (keyring unchanged). */
 export async function reencryptPayload(
   dek: Uint8Array,

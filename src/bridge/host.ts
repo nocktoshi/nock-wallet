@@ -89,7 +89,10 @@ export function attachBridgeHost(host: BridgeHost, win: Window = window): () => 
     const d = event.data;
     if (!isBridgeMessage(d) || d.kind !== "request") return;
     const source = event.source as WindowProxy | null;
-    if (!source) return;
+    // Only accept requests from the window that opened this popup (the dApp).
+    // Stops any other window/iframe with a handle from injecting requests; the
+    // origin is still shown and every action is explicitly user-approved.
+    if (!source || source !== win.opener) return;
     const origin = event.origin;
     host.enqueue({ id: d.id, method: d.method, params: d.params, origin }, (resp) =>
       source.postMessage(resp, origin)

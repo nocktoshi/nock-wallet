@@ -46,8 +46,20 @@ export function HomeScreen() {
 
       <div className="balance-card">
         <div className="muted">Balance</div>
-        <div className="balance-amount">
-          {bal.loading && bal.total === 0n ? "…" : formatNock(bal.total, 2)}{" "}
+        <div
+          className="balance-amount"
+          role={bal.loading && bal.total === 0n ? "status" : undefined}
+          aria-live={bal.loading && bal.total === 0n ? "polite" : undefined}
+        >
+          {bal.loading && bal.total === 0n ? (
+            <span className="quote-dots" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </span>
+          ) : (
+            formatNock(bal.total, 2)
+          )}{" "}
           <span className="balance-unit">	ℕOCK</span>
         </div>
         {nockUsd != null && (

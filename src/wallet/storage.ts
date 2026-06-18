@@ -50,3 +50,22 @@ export function clearStoredWallet(): Promise<undefined> {
 export async function hasStoredWallet(): Promise<boolean> {
   return (await loadStoredWallet()) !== null;
 }
+
+/* ── Kept-session wrapping key ────────────────────────────────────────────────
+ * A non-extractable AES-GCM CryptoKey (structured-cloneable, so it lives in IDB)
+ * that wraps the DEK for the "never auto-lock" refresh-survival path. Stored
+ * under a separate key in the same object store — no schema change. */
+const SESSION_WRAP_KEY = "session-wrap-key";
+
+export function saveSessionWrapKey(key: CryptoKey): Promise<IDBValidKey> {
+  return tx("readwrite", (s) => s.put(key, SESSION_WRAP_KEY));
+}
+
+export async function loadSessionWrapKey(): Promise<CryptoKey | null> {
+  const v = await tx<CryptoKey | undefined>("readonly", (s) => s.get(SESSION_WRAP_KEY));
+  return v ?? null;
+}
+
+export function clearSessionWrapKey(): Promise<undefined> {
+  return tx("readwrite", (s) => s.delete(SESSION_WRAP_KEY));
+}

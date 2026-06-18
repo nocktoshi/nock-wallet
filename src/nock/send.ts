@@ -12,7 +12,6 @@ import {
   PrivateKey,
   nockchainTxToRawTx,
   rawTxV1CalcId,
-  rawTxTotalFees,
   type Digest,
   type Nicks,
   type TxLock,
@@ -68,11 +67,10 @@ export function prepareSend(input: SendInput): PreparedSend {
         String(amount) as Nicks,
         feeOverride != null ? (String(feeOverride) as Nicks) : null,
         senderPkh,
-        true,
+        false,
         memo ? { memo } : undefined
       );
-      const tx = builder.build();
-      const fee = BigInt(rawTxTotalFees(nockchainTxToRawTx(tx)) as unknown as string);
+      const fee = BigInt(builder.calcFee());
       const inputsTotal = selected.reduce((s, x) => s + x.assets, 0n);
       const change = inputsTotal - amount - fee;
       if (change < 0n) continue; // shouldn't happen (build would have thrown), but be safe

@@ -76,6 +76,27 @@ export function Spinner({ label }: { label?: string }) {
   );
 }
 
+/** Bouncing dots used during quotes and swap step waits. */
+export function QuoteDots() {
+  return (
+    <span className="quote-dots" aria-hidden="true">
+      <span></span>
+      <span></span>
+      <span></span>
+    </span>
+  );
+}
+
+/** Pulsing status line with dancing dots — matches the RFQ quote loader. */
+export function SwapWaiting({ label }: { label: string }) {
+  return (
+    <p className="swap-rate quoting swap-waiting" role="status" aria-live="polite">
+      {label}
+      <QuoteDots />
+    </p>
+  );
+}
+
 export function ErrorText({ children }: { children: ReactNode }) {
   if (!children) return null;
   return <p className="error-text mono-wrap">{children}</p>;

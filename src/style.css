@@ -84,7 +84,7 @@ textarea,
 select {
   font: inherit;
   width: 100%;
-  background: #0b0c10;
+  background: var(--bg);
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -158,7 +158,7 @@ button.big {
   margin-left: 1rem;
 }
 .home-top h3 {
-  color: rgb(124, 92, 255);
+  color: var(--accent);
   width: 25rem;
   padding-left: 1.1rem;
   text-align: center;
@@ -241,7 +241,7 @@ input[type="number"] {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  background: #0b0c10;
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 10px;
@@ -312,8 +312,8 @@ input[type="number"] {
   cursor: pointer;
 }
 .app-logo {
-  width: 2rem;
-  height: 2rem;
+  width: 3rem;
+  height: 3rem;
   border-radius: 0.6rem;
 }
 .app-title {
@@ -339,9 +339,19 @@ input[type="number"] {
   font-size: 34px;
   font-weight: 700;
 }
+.balance-amount .quote-dots {
+  display: inline-flex;
+  vertical-align: middle;
+  gap: 6px;
+  margin: 4px 0;
+}
+.balance-amount .quote-dots span {
+  width: 8px;
+  height: 8px;
+}
 .balance-unit {
   font-size: 16px;
-  color: var(--muted);
+  color: var(--accent);
 }
 .balance-usd {
   font-size: 14px;
@@ -535,6 +545,22 @@ input[type="number"] {
   max-height: 180px;
   overflow: auto;
 }
+.approval-tx {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.approval-tx-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.approval-tx-note {
+  font-size: 11px;
+  margin: 4px 0 0;
+}
 
 /* swap */
 .swap-home-btn {
@@ -682,6 +708,7 @@ input[type="number"] {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-fg);
+  animation: step-marker-pulse 2s ease-in-out infinite;
 }
 
 .swap-step-label {
@@ -774,6 +801,13 @@ input[type="number"] {
   animation: rate-pulse 1.6s ease-in-out infinite;
 }
 
+.swap-waiting {
+  flex-wrap: wrap;
+  text-align: center;
+  line-height: 1.45;
+  margin: 4px 0;
+}
+
 .swap-rate.swap-warn {
   color: #e0b341;
 }
@@ -831,6 +865,20 @@ input[type="number"] {
     opacity: 1;
   }
 }
+
+@keyframes step-marker-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 #7c5cff00;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.88;
+    box-shadow: 0 0 10px 2px #7c5cff55;
+    transform: scale(1.05);
+  }
+}
 @keyframes quote-dot {
   0%,
   80%,
@@ -847,6 +895,7 @@ input[type="number"] {
 /* Respect reduced-motion: keep the cue, drop the movement. */
 @media (prefers-reduced-motion: reduce) {
   .swap-rate.quoting,
+  .swap-step.active .swap-step-marker,
   .swap-amount-skeleton,
   .quote-dots span {
     animation: none;

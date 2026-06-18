@@ -8,6 +8,7 @@ import {
 } from "./tx.js";
 import { Nicks, noteFromProtobuf, spendConditionNewPkh, spendConditionFirstName } from '@nockchain/rose-ts'
 import type { NockWalletSession } from "./wallet.js";
+import { estimateLockTxFeeNicks } from "./fees.js";
 import {
   NOCK_BLOCK_SECONDS,
   SWAP_SAFETY_MARGIN_SEC,
@@ -98,6 +99,38 @@ export async function parseBalanceEntries(
     out.push({ note, assets: noteAssetsNicks(note) });
   }
   return out;
+}
+
+export interface SellAffordability {
+  feeNicks: bigint;
+  needNicks: bigint;
+  insufficientTotal: boolean;
+  fragmented: boolean;
+}
+
+/** Whether the wallet can fund gift + lock tx fee (single-note spend). */
+export function checkSellAffordability(
+  entries: BalanceEntry[],
+  giftNicks: bigint,
+  sellerPkh: Digest
+): SellAffordability | null {
+  if (giftNicks <= 0n) return null;
+  const total = entries.reduce((s, c) => s + c.assets, 0n);
+  const largest = entries.reduce((m, c) => (c.assets > m ? c.assets : m), 0n);
+  const largestEntry =
+    entries.length > 0
+      ? entries.reduce((best, c) => (c.assets > best.assets ? c : best))
+      : null;
+  const feeNicks = largestEntry
+    ? estimateLockTxFeeNicks(largestEntry.note, giftNicks, sellerPkh)
+    : 2n * NICKS_PER_NOCK;
+  const needNicks = giftNicks + feeNicks;
+  return {
+    feeNicks,
+    needNicks,
+    insufficientTotal: total < needNicks,
+    fragmented: total >= needNicks && largest < needNicks,
+  };
 }
 
 export function pickLargestNote(

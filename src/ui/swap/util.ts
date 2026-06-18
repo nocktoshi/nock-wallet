@@ -1,5 +1,6 @@
 import { formatNock, parseNockToNicks } from "../../nock/units.js";
 import { MIN_NOCK_AMOUNT } from "../../swap/config.js";
+import type { SellAffordability } from "../../swap/nock/balance.js";
 
 export function nicksToNock(nicks: bigint | undefined): string {
   if (nicks == null) return "";
@@ -21,6 +22,31 @@ export function belowMinNock(nockAmount: number): boolean {
 
 export function minNockAmountError(): string {
   return `Minimum NOCK amount is ${MIN_NOCK_AMOUNT} NOCK (to cover on-chain fees).`;
+}
+
+export function sellInsufficientBalanceError(
+  giftNicks: bigint,
+  totalNicks: bigint,
+  affordability: SellAffordability
+): string {
+  return (
+    `Insufficient balance — you have ${formatNock(totalNicks, 2)} NOCK but need ` +
+    `${formatNock(giftNicks, 2)} + ~${formatNock(affordability.feeNicks, 4)} fee ` +
+    `(${formatNock(affordability.needNicks, 2)} total).`
+  );
+}
+
+export function sellFragmentedBalanceError(
+  giftNicks: bigint,
+  totalNicks: bigint,
+  largestNicks: bigint,
+  affordability: SellAffordability
+): string {
+  return (
+    `Your largest note is ${formatNock(largestNicks, 2)} NOCK, but you hold ${formatNock(totalNicks, 2)} NOCK ` +
+    `across multiple notes. Selling ${formatNock(giftNicks, 2)} NOCK needs one note of at least ` +
+    `${formatNock(affordability.needNicks, 2)} NOCK (amount + ~${formatNock(affordability.feeNicks, 4)} fee) — consolidate first.`
+  );
 }
 
 export function swapUrl(hEvm: string | undefined): string {
