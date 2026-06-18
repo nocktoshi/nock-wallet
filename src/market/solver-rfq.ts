@@ -1,7 +1,7 @@
 /** Public RFQ wire types — response from POST /solver/rfq. */
 
 export type RfqSide = "buy" | "sell";
-export type RfqStatus = "pending" | "ready" | "rejected" | "expired" | "offline";
+export type RfqStatus = "pending" | "ready" | "rejected" | "expired" | "offline" | "busy";
 
 export interface SolverRfqResponse {
   rfqId: string;
