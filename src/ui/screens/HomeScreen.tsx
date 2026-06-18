@@ -62,7 +62,7 @@ export function HomeScreen() {
           )}{" "}
           <span className="balance-unit">	ℕOCK</span>
         </div>
-        {nockUsd != null && (
+        {nockUsd != null && !(bal.loading && bal.total === 0n) && (
           <div className="muted balance-usd">≈ {formatUsd(nicksToUsd(bal.total, nockUsd))}</div>
         )}
         <button className="addr-chip" onClick={() => copy(active.pkh)} title="Copy address">

@@ -30,6 +30,16 @@ export function useBalance(pkh: Digest | undefined, pollMs = 15_000): BalanceSta
 
   const refresh = useCallback(() => setNonce((n) => n + 1), []);
 
+  // Clear the previous account's figures the instant the active PKH changes so
+  // the UI shows a loader (not a stale balance) until the first fetch resolves.
+  // Keyed on `pkh` only — a same-account poll refresh (nonce) must not wipe it.
+  useEffect(() => {
+    setTotal(0n);
+    setNotes([]);
+    setBlockId(undefined);
+    setError("");
+  }, [pkh]);
+
   useEffect(() => {
     if (!pkh) return;
     let alive = true;
