@@ -717,14 +717,94 @@ input[type="number"] {
 
 .swap-rate.quoting {
   color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  animation: rate-pulse 1.6s ease-in-out infinite;
 }
 
 .swap-rate.swap-warn {
   color: #e0b341;
 }
 
-.swap-interface.quoting .swap-panel:last-of-type .swap-amount {
-  opacity: 0.5;
+/* Quote pending: a shimmer placeholder where the NOCK amount will land. */
+.swap-amount-skeleton {
+  flex: 1;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(
+    100deg,
+    #14151c 8%,
+    #7c5cff26 24%,
+    #7c5cff55 40%,
+    #7c5cff26 56%,
+    #14151c 72%
+  );
+  background-size: 220% 100%;
+  animation: quote-shimmer 1.4s ease-in-out infinite;
+}
+
+/* Bouncing dots beside "Finding your best rate". */
+.quote-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+.quote-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: quote-dot 1.2s ease-in-out infinite;
+}
+.quote-dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.quote-dots span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes quote-shimmer {
+  0% {
+    background-position: 220% 0;
+  }
+  100% {
+    background-position: -220% 0;
+  }
+}
+@keyframes rate-pulse {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes quote-dot {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  40% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+/* Respect reduced-motion: keep the cue, drop the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .swap-rate.quoting,
+  .swap-amount-skeleton,
+  .quote-dots span {
+    animation: none;
+  }
+  .swap-amount-skeleton {
+    background: #7c5cff33;
+  }
 }
 
 .swap-wizard {

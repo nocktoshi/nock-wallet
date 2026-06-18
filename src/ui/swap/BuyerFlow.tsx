@@ -740,19 +740,26 @@ export function BuyerFlow({
         <div className="swap-panel">
           <span className="swap-panel-label">You receive</span>
           <div className="swap-panel-row">
-            <input
-              className="swap-amount"
-              readOnly
-              placeholder={quoting ? "…" : "0"}
-              value={quoting ? "" : estNock != null ? estNock.toFixed(2) : ""}
-            />
+            {quoting ? (
+              <div className="swap-amount-skeleton" aria-hidden="true" />
+            ) : (
+              <input
+                className="swap-amount"
+                readOnly
+                placeholder="0"
+                value={estNock != null ? estNock.toFixed(2) : ""}
+              />
+            )}
             <span className="swap-token-pill">NOCK</span>
           </div>
         </div>
       </div>
 
       {quoting ? (
-        <p className="swap-rate quoting muted">Getting quote…</p>
+        <p className="swap-rate quoting" role="status" aria-live="polite">
+          Finding your best rate
+          <span className="quote-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+        </p>
       ) : online === false ? (
         <p className="swap-rate muted">Solver offline — try again shortly</p>
       ) : quoteReady && quote.pricePerNock != null ? (
