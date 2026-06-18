@@ -120,7 +120,29 @@ export async function restoreWalletConnect(): Promise<Address | null> {
   return null;
 }
 
-/** Tear down the active WalletConnect session. */
+/** Remove WalletConnect's persisted state so the next connect starts clean and
+ *  shows the wallet picker. Without this, a surviving `wc@2:*` session makes the
+ *  next connect silently re-attach the old wallet, and `WALLETCONNECT_DEEPLINK_
+ *  CHOICE` makes the mobile modal auto-deep-link to the last wallet (e.g. Trust)
+ *  instead of letting the user pick. Best-effort: runs even if `disconnect()`
+ *  threw because the relay was unreachable. */
+function purgeWalletConnectStorage(): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const stale: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith("wc@2:") || k === "WALLETCONNECT_DEEPLINK_CHOICE")) {
+        stale.push(k);
+      }
+    }
+    for (const k of stale) localStorage.removeItem(k);
+  } catch {
+    // storage unavailable — nothing more we can do
+  }
+}
+
+/** Tear down the active WalletConnect session and purge its persisted state. */
 export async function disconnectWalletConnect(): Promise<void> {
   unregisterWallet(WALLETCONNECT_RDNS);
   const provider = wcProvider;
@@ -129,7 +151,8 @@ export async function disconnectWalletConnect(): Promise<void> {
     try {
       await provider.disconnect();
     } catch {
-      // already gone
+      // relay unreachable — the local purge below still clears the session
     }
   }
+  purgeWalletConnectStorage();
 }
